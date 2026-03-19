@@ -4,71 +4,64 @@ import datetime
 import numpy as np
 
 
-def generate_granular_training_data(
+def export_continuous_minima(
     tickers, years=20, window_size=100, buffer=10, output_file="training_data.csv"
 ):
-    all_data_points = []
+    all_data = []
     end_date = datetime.datetime.now()
     start_date = end_date - datetime.timedelta(days=years * 365)
 
     for ticker in tickers:
         print(f"Processing {ticker}...")
         try:
-            # Download data
             data = yf.download(ticker, start=start_date, end=end_date)
 
             if data.empty:
                 print(f"No data found for {ticker}. Skipping.")
                 continue
 
-            # Extract Low prices correctly
             if isinstance(data.columns, pd.MultiIndex):
                 low_prices = data["Low"][ticker]
             else:
                 low_prices = data["Low"]
 
-            # Filter out any NaN values
             low_prices = low_prices.dropna()
 
-            # Sliding window logic
-            # Step size 10 to provide enough training data while keeping file size reasonable
-            step = 10
+            ticker_df = pd.DataFrame({"ticker": ticker, "price": low_prices.values})
+            ticker_df["is_minima"] = 0
+            ticker_df["index"] = range(len(ticker_df))
 
-            for i in range(0, len(low_prices) - window_size + 1, step):
+            for i in range(0, len(low_prices) - window_size + 1):
                 window = low_prices.iloc[i : i + window_size]
 
-                # Find the index of the minimum value in the window
                 min_date = window.idxmin()
                 min_idx_in_window = window.index.get_loc(min_date)
 
-                # RELIABILITY RULE: Skip if minimum is within the first 10 days
-                if min_idx_in_window < buffer:
-                    continue
+                if buffer <= min_idx_in_window < (window_size - buffer):
+                    global_idx = i + min_idx_in_window
+                    ticker_df.at[global_idx, "is_minima"] = 1
 
-                # For each point in the window, create a row
-                for idx, price in enumerate(window.values.flatten()):
-                    is_minima = 1 if idx == min_idx_in_window else 0
-                    all_data_points.append(
-                        {
-                            "ticker": ticker,
-                            "index": idx,
-                            "price": float(price),
-                            "is_minima": is_minima,
-                        }
-                    )
+            ticker_df = ticker_df[["ticker", "index", "price", "is_minima"]]
+            all_data.append(ticker_df)
+            print(
+                f"Collected {len(ticker_df)} days for {ticker}, with {ticker_df['is_minima'].sum()} minima."
+            )
 
         except Exception as e:
             print(f"Error processing {ticker}: {e}")
 
-    # Create the final DataFrame
-    training_df = pd.DataFrame(all_data_points)
-    training_df.to_csv(output_file, index=False)
-    print(f"\nSuccessfully saved {len(training_df)} data points to {output_file}")
-    return training_df
+    if not all_data:
+        print("No data collected.")
+        return None
+
+    final_df = pd.concat(all_data, ignore_index=True)
+
+    final_df.to_csv(output_file, index=False)
+    print(f"\nSuccessfully saved {len(final_df)} total rows to {output_file}")
+    return final_df
 
 
 if __name__ == "__main__":
-    # Diverse set of tickers
     diverse_tickers = [
         "AAPL",
         "XOM",
@@ -82,5 +75,4 @@ if __name__ == "__main__":
         "BTC-USD",
     ]
 
-    generate_granular_training_data(diverse_tickers)
-
+    export_continuous_minima(diverse_tickers)
