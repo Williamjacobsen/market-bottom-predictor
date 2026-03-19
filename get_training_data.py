@@ -2,12 +2,14 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import numpy as np
+import random
 
 
-def generate_training_data(
+def generate_balanced_training_data(
     tickers, years=20, window_size=100, buffer=10, output_file="training_data.csv"
 ):
-    all_rows = []
+    class_0_rows = []
+    class_1_rows = []
     end_date = datetime.datetime.now()
     start_date = end_date - datetime.timedelta(days=years * 365)
 
@@ -21,7 +23,7 @@ def generate_training_data(
                 print(f"No data found for {ticker}. Skipping.")
                 continue
 
-            # Extract Low prices correctly for both single and multi-ticker downloads
+            # Extract Low prices correctly
             if isinstance(data.columns, pd.MultiIndex):
                 low_prices = data["Low"][ticker]
             else:
@@ -31,10 +33,9 @@ def generate_training_data(
             low_prices = low_prices.dropna()
 
             # Sliding window logic
-            # Use step size 5 to get a good number of samples while keeping the file manageable
-            step = 5
+            # Step size 1 to maximize potential samples
+            step = 1
 
-            ticker_samples = 0
             for i in range(0, len(low_prices) - window_size + 1, step):
                 window = low_prices.iloc[i : i + window_size]
 
@@ -42,28 +43,50 @@ def generate_training_data(
                 min_date = window.idxmin()
                 min_idx_in_window = window.index.get_loc(min_date)
 
-                # Check reliability: not in first 10 or last 10 days
-                if buffer <= min_idx_in_window < (window_size - buffer):
-                    # For training a NN, it's often best to normalize prices relative to the window
-                    # so the network learns shapes rather than absolute dollar values.
-                    # We'll keep them raw as requested, but we'll add the ticker for context if needed.
-                    prices = window.values.flatten().tolist()
-                    row = prices + [min_idx_in_window]
-                    all_rows.append(row)
-                    ticker_samples += 1
+                # RELIABILITY RULE: Skip if minimum is within the first 10 days
+                if min_idx_in_window < buffer:
+                    continue
 
-            print(f"Added {ticker_samples} samples from {ticker}.")
+                # Collect the 100 prices
+                prices = window.values.flatten().tolist()
+
+                # BINARY CLASSIFICATION:
+                # 1 if the minimum is at the last index (price_99), 0 otherwise
+                if min_idx_in_window == (window_size - 1):
+                    class_1_rows.append(prices + [1])
+                else:
+                    class_0_rows.append(prices + [0])
+
+            print(
+                f"Current count: Class 1: {len(class_1_rows)}, Class 0: {len(class_0_rows)}"
+            )
 
         except Exception as e:
             print(f"Error processing {ticker}: {e}")
 
+    # BALANCING LOGIC:
+    # We want a 50/50 split. We'll take all of Class 1 and a random sample of Class 0.
+    num_class_1 = len(class_1_rows)
+    print(
+        f"\nFinal count before balancing: Class 1: {num_class_1}, Class 0: {len(class_0_rows)}"
+    )
+
+    if len(class_0_rows) > num_class_1:
+        sampled_class_0 = random.sample(class_0_rows, num_class_1)
+    else:
+        sampled_class_0 = class_0_rows
+        print("Warning: Fewer Class 0 samples than Class 1. Dataset will be smaller.")
+
+    all_rows = class_1_rows + sampled_class_0
+    random.shuffle(all_rows)  # Shuffle to mix classes
+
     # Create column names
-    columns = [f"price_{j}" for j in range(window_size)] + ["target_min_idx"]
+    columns = [f"price_{j}" for j in range(window_size)] + ["is_min_at_last"]
 
     training_df = pd.DataFrame(all_rows, columns=columns)
     training_df.to_csv(output_file, index=False)
     print(
-        f"\nSuccessfully saved total {len(training_df)} training samples to {output_file}"
+        f"Successfully saved total {len(training_df)} balanced training samples to {output_file}"
     )
     return training_df
 
@@ -71,16 +94,17 @@ def generate_training_data(
 if __name__ == "__main__":
     # Diverse set of tickers
     diverse_tickers = [
-        "AAPL",  # Tech/Growth
-        "XOM",  # Energy/Value
-        "WMT",  # Retail/Stable
-        "TSLA",  # High Volatility
-        "GLD",  # Commodities/Gold
-        "JPM",  # Financials
-        "TLT",  # Bonds/Interest Rate sensitive
-        "AMZN",  # E-commerce/Cloud
-        "KO",  # Consumer Staples
-        "BTC-USD",  # Crypto (Very different behavior)
+        "AAPL",
+        "XOM",
+        "WMT",
+        "TSLA",
+        "GLD",
+        "JPM",
+        "TLT",
+        "AMZN",
+        "KO",
+        "BTC-USD",
     ]
 
-    generate_training_data(diverse_tickers)
+    generate_balanced_training_data(diverse_tickers)
+
