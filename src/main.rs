@@ -5,7 +5,7 @@ struct Row {
     ticker: String,
     _index: usize,
     price: f64,
-    is_minima: bool,
+    is_minima: f64,
 }
 
 fn get_data() -> Result<Vec<Row>, Box<dyn Error>> {
@@ -21,7 +21,7 @@ fn get_data() -> Result<Vec<Row>, Box<dyn Error>> {
             ticker: record[0].to_string(),
             _index: record[1].parse::<usize>()?,
             price: record[2].parse::<f64>()?,
-            is_minima: record[3].parse::<u8>()? == 1,
+            is_minima: record[3].parse::<f64>()?,
         };
 
         records.push(row.clone());
@@ -101,12 +101,15 @@ fn forward_pass(input_vector: Vec<f64>) -> f64 {
     // Output neuron activation
     output_signal = sigmoid(output_signal);
 
-    println!("{:?}", output_signal);
-
     output_signal
 }
 
-fn loss(prediction_odds: f64, label: bool) {}
+fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
+    let epsilon: f64 = 1e-15;
+    let propability: f64 = prediction_propability.clamp(epsilon, 1.0 - epsilon);
+
+    -(label * propability.ln() + (1.0 - label) * (1.0 - propability).ln())
+}
 
 fn backward_pass() {}
 
@@ -129,10 +132,14 @@ fn main() {
             break;
         }
     }
-    let label: bool = records[190].is_minima;
+    let label: f64 = records[190].is_minima;
 
     println!("{:?}", input_vector.len());
     println!("{:?}", label);
 
-    let prediction_odds = forward_pass(input_vector);
+    let prediction_propability = forward_pass(input_vector);
+    println!("{:?}", prediction_propability);
+
+    let loss = binary_cross_entropy_loss(prediction_propability, label);
+    println!("{:?}", loss);
 }
