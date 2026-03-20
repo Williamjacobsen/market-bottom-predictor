@@ -106,7 +106,7 @@ fn forward_pass(input_vector: Vec<f64>) -> f64 {
     output_signal
 }
 
-fn loss() {}
+fn loss(prediction_odds: f64, label: bool) {}
 
 fn backward_pass() {}
 
@@ -122,13 +122,17 @@ fn main() {
 
     let mut input_vector: Vec<f64> = Vec::new();
 
-    for index in 0..records.len() {
+    for index in 91..records.len() {
         input_vector.push(records[index].price);
 
-        if index == 99 {
+        if index == 190 {
             break;
         }
     }
+    let label: bool = records[190].is_minima;
 
-    forward_pass(input_vector);
+    println!("{:?}", input_vector.len());
+    println!("{:?}", label);
+
+    let prediction_odds = forward_pass(input_vector);
 }
