@@ -56,16 +56,19 @@ fn relu(x: f64) -> f64 {
     }
 }
 
-fn forward_pass() {
+fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+fn forward_pass(input_vector: Vec<f64>) -> f64 {
     /*
      * hidden_weights size: hidden_layer_neurons_count * input_dimensions,
      * 50 * 100,
      * 50 rows, 100 columns,
      * there is 50 neuron and each neuron has 100 inputs,
      */
-    let hidden_weights: Vec<Vec<f64>> = Vec::new();
-    let input_vector: Vec<f64> = Vec::new();
-    let hidden_biases: Vec<f64> = Vec::new();
+    let hidden_weights: Vec<Vec<f64>> = vec![vec![0.1f64; 100]; 50];
+    let hidden_biases: Vec<f64> = vec![0f64; 50];
 
     // Hidden layers internal score
     let mut neuron_signals: Vec<f64> = Vec::new();
@@ -84,9 +87,24 @@ fn forward_pass() {
     for score in neuron_signals.iter_mut() {
         *score = relu(*score);
     }
-}
 
-fn sigmoid() {}
+    // Output neuron internal score
+    let output_weights: Vec<f64> = vec![0.1f64; 50];
+    let output_bias: f64 = 0f64;
+
+    let mut output_signal: f64 = 0f64;
+    for (neuron_signal, output_weight) in neuron_signals.iter().zip(output_weights.iter()) {
+        output_signal += neuron_signal * output_weight;
+    }
+    output_signal += output_bias;
+
+    // Output neuron activation
+    output_signal = sigmoid(output_signal);
+
+    println!("{:?}", output_signal);
+
+    output_signal
+}
 
 fn loss() {}
 
@@ -102,5 +120,15 @@ fn main() {
     let mut records: Vec<Row> = get_data().unwrap();
     pre_process_data(&mut records);
 
-    forward_pass();
+    let mut input_vector: Vec<f64> = Vec::new();
+
+    for index in 0..records.len() {
+        input_vector.push(records[index].price);
+
+        if index == 99 {
+            break;
+        }
+    }
+
+    forward_pass(input_vector);
 }
