@@ -62,17 +62,30 @@ def export_continuous_minima(
 
 
 if __name__ == "__main__":
-    diverse_tickers = [
+    training_tickers = [
         "AAPL",
         "XOM",
-        "WMT",
-        "TSLA",
+        "JNJ",
         "GLD",
-        "JPM",
         "TLT",
-        "AMZN",
-        "KO",
+        "VNQ",
+        "DBA",
+        "USO",
         "BTC-USD",
+        "EEM",
     ]
 
-    export_continuous_minima(diverse_tickers)
+    export_continuous_minima(training_tickers)
+
+    evaluation_tickers = [
+        "KO",
+        "JPM",
+        "LQD",
+        "UCO",
+        "SLV",
+        "AMZN",
+        "PFE",
+        "XLE",
+    ]
+
+    export_continuous_minima(evaluation_tickers, output_file="evaluation_data.csv")

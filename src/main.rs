@@ -9,8 +9,8 @@ struct Row {
     is_minima: f64,
 }
 
-fn get_data() -> Result<Vec<Row>, Box<dyn Error>> {
-    let file = File::open("training_data.csv")?;
+fn get_data(path: String) -> Result<Vec<Row>, Box<dyn Error>> {
+    let file = File::open(path)?;
     let mut rdr = csv::Reader::from_reader(file);
 
     let mut records: Vec<Row> = Vec::new();
@@ -27,6 +27,8 @@ fn get_data() -> Result<Vec<Row>, Box<dyn Error>> {
 
         records.push(row.clone());
     }
+
+    pre_process_data(&mut records);
 
     Ok(records)
 }
@@ -132,8 +134,8 @@ fn backward_pass(
 
     let original_output_weights = output_weights.clone();
 
-    // TODO: let weight = if label == 1.0 { 10.0 } else { 1.0 };
-    let gradient = prediction_propability - label;
+    let weight = if label == 1.0 { 10.0 } else { 1.0 }; // Due to infrequent 1's
+    let gradient = (prediction_propability - label) * weight;
 
     for (weight, activation) in output_weights
         .iter_mut()
@@ -164,6 +166,7 @@ fn backward_pass(
 }
 
 fn train(
+    window_size: usize,
     hidden_layer_weights: &mut Vec<Vec<f64>>,
     hidden_layer_biases: &mut Vec<f64>,
     output_weights: &mut Vec<f64>,
@@ -171,27 +174,27 @@ fn train(
 ) {
     let learning_rate: f64 = 0.02;
     let epochs = 20;
-    let window_size = 100;
 
-    let mut records: Vec<Row> = get_data().unwrap();
-    pre_process_data(&mut records);
+    let records: Vec<Row> = get_data("training_data.csv".to_string()).unwrap();
 
-    let mut index = 0;
     let mut input_vector: VecDeque<f64> = VecDeque::new();
-    for i in 1..records.len() {
-        input_vector.push_back(records[i].price);
-
-        if i == window_size {
-            index = window_size;
-            break;
-        }
-    }
-    let label: f64 = records[index].is_minima;
-    println!("{:?}", input_vector.len());
+    let mut label: f64 = 0.0;
+    let mut prev_ticker = "";
 
     for epoch in 0..epochs {
         for i in window_size..records.len() {
-            // TODO: if new ticker, get & skip the first window_size data points again
+            if records[i].ticker != prev_ticker {
+                input_vector.clear();
+                for j in 1..records.len() {
+                    input_vector.push_back(records[j].price);
+
+                    if j == window_size {
+                        label = records[j].is_minima;
+                        break;
+                    }
+                }
+                prev_ticker = &records[i].ticker;
+            }
 
             let (prediction_probability, hidden_activations) = forward_pass(
                 Vec::from(input_vector.clone()),
@@ -216,24 +219,41 @@ fn train(
                 output_bias,
             );
 
-            index += 1;
-            if index >= records.len() {
-                break;
-            }
             input_vector.pop_front();
-            input_vector.push_back(records[index].price);
+            input_vector.push_back(records[i].price);
+            label = records[i].is_minima;
         }
     }
 }
 
-fn predict() {}
+fn predict(
+    input_vector: Vec<f64>,
+    hidden_layer_weights: &mut Vec<Vec<f64>>,
+    hidden_layer_biases: &mut Vec<f64>,
+    output_weights: &mut Vec<f64>,
+    output_bias: &mut f64,
+) -> f64 {
+    let (prediction_probability, _) = forward_pass(
+        input_vector.clone(),
+        hidden_layer_weights.clone(),
+        hidden_layer_biases.clone(),
+        output_weights.clone(),
+        *output_bias,
+    );
 
-fn evaluate() {}
+    prediction_probability
+}
+
+fn evaluate(
+    window_size: usize,
+    hidden_layer_weights: &mut Vec<Vec<f64>>,
+    hidden_layer_biases: &mut Vec<f64>,
+    output_weights: &mut Vec<f64>,
+    output_bias: &mut f64,
+) {
+}
 
 fn main() {
-    let mut records: Vec<Row> = get_data().unwrap();
-    pre_process_data(&mut records);
-
     // TODO: Randomize
     let mut hidden_layer_weights: Vec<Vec<f64>> = vec![vec![0.1f64; 100]; 50];
     let mut hidden_layer_biases: Vec<f64> = vec![0f64; 50];
@@ -241,10 +261,23 @@ fn main() {
     let mut output_weights: Vec<f64> = vec![0.1f64; 50];
     let mut output_bias: f64 = 0f64;
 
+    let window_size: usize = 100;
+
     train(
+        window_size.clone(),
         &mut hidden_layer_weights,
         &mut hidden_layer_biases,
         &mut output_weights,
         &mut output_bias,
     );
+
+    /*
+    evaluate(
+        window_size,
+        &mut hidden_layer_weights,
+        &mut hidden_layer_biases,
+        &mut output_weights,
+        &mut output_bias,
+    );
+    */
 }
