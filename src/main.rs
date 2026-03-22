@@ -43,6 +43,16 @@ fn pre_process_data(records: &mut Vec<Row>) {
     records.remove(0); // Can't take the difference when there is no previous price.
 }
 
+/*
+// Xavier initialization (common for sigmoid)
+let limit = (6.0 / (fan_in + fan_out) as f64).sqrt();
+w = random_uniform(-limit, limit)
+
+// He initialization (common for ReLU)
+let std = (2.0 / fan_in as f64).sqrt();
+w = random_normal(0.0, std)
+*/
+
 // Forward pass math:
 // y_scalar = sigmoid( output_weights * ReLU( hidden_weight * input_vector + hidden_biases ) + output_biases )
 
@@ -60,7 +70,7 @@ fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
 
-fn forward_pass(input_vector: Vec<f64>) -> f64 {
+fn forward_pass(input_vector: Vec<f64>) -> (f64, Vec<f64>, f64, Vec<f64>, Vec<Vec<f64>>, Vec<f64>) {
     /*
      * hidden_weights size: hidden_layer_neurons_count * input_dimensions,
      * 50 * 100,
@@ -101,7 +111,14 @@ fn forward_pass(input_vector: Vec<f64>) -> f64 {
     // Output neuron activation
     output_signal = sigmoid(output_signal);
 
-    output_signal
+    (
+        output_signal,
+        output_weights,
+        output_bias,
+        neuron_signals,
+        hidden_weights,
+        hidden_biases,
+    )
 }
 
 fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
@@ -111,7 +128,27 @@ fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
     -(label * propability.ln() + (1.0 - label) * (1.0 - propability).ln())
 }
 
-fn backward_pass() {}
+fn backward_pass(
+    learning_rate: f64,
+    label: f64,
+    prediction_propability: f64,
+    hidden_layer_activations: Vec<f64>,
+    hidden_layer_weights: &mut Vec<Vec<f64>>,
+    hidden_layer_biases: &mut Vec<f64>,
+    output_weights: &mut Vec<f64>,
+    output_bias: &mut f64,
+) {
+    let gradient = prediction_propability - label;
+
+    println!("{:?}", gradient);
+
+    for (weight, activation) in output_weights
+        .iter_mut()
+        .zip(hidden_layer_activations.iter())
+    {
+        *weight -= learning_rate * gradient * activation;
+    }
+}
 
 fn train() {}
 
@@ -137,9 +174,29 @@ fn main() {
     println!("{:?}", input_vector.len());
     println!("{:?}", label);
 
-    let prediction_propability = forward_pass(input_vector);
+    let (
+        prediction_propability,
+        mut output_weights,
+        mut output_bias,
+        hidden_activations,
+        mut hidden_weights,
+        mut hidden_biases,
+    ) = forward_pass(input_vector);
     println!("{:?}", prediction_propability);
 
     let loss = binary_cross_entropy_loss(prediction_propability, label);
     println!("{:?}", loss);
+
+    let learning_rate = 0.02;
+
+    backward_pass(
+        learning_rate,
+        label,
+        prediction_propability,
+        hidden_activations,
+        &mut hidden_weights,
+        &mut hidden_biases,
+        &mut output_weights,
+        &mut output_bias,
+    );
 }
