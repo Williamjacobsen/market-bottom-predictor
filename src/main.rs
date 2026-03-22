@@ -1,4 +1,6 @@
-use std::collections::VecDeque;
+use rand::seq::SliceRandom;
+use rand::Rng;
+use rand_distr::{Distribution, Normal};
 use std::{error::Error, fs::File};
 
 #[derive(Debug, Clone)]
@@ -34,38 +36,43 @@ fn get_data(path: String) -> Result<Vec<Row>, Box<dyn Error>> {
 }
 
 fn pre_process_data(records: &mut Vec<Row>) {
-    let mut prev_price = records[0].price;
+    let mut i = 0;
+    while i < records.len() {
+        let ticker = records[i].ticker.clone();
+        let end = records[i..]
+            .iter()
+            .position(|r| r.ticker != ticker)
+            .map(|p| i + p)
+            .unwrap_or(records.len());
 
-    // Normalize price
-    for record in records.iter_mut().skip(1) {
-        let new_price = (record.price - prev_price) / prev_price;
-        prev_price = record.price;
-        record.price = new_price;
+        // Normalize within this ticker only
+        let mut prev_price = records[i].price;
+        for j in (i + 1)..end {
+            let new_price = (records[j].price - prev_price) / prev_price;
+            prev_price = records[j].price;
+            records[j].price = new_price;
+        }
+
+        records.remove(i);
+        i = end - 1;
     }
-
-    records.remove(0); // Can't take the difference when there is no previous price.
 }
-
-/*
-// Xavier initialization (common for sigmoid)
-let limit = (6.0 / (fan_in + fan_out) as f64).sqrt();
-w = random_uniform(-limit, limit)
-
-// He initialization (common for ReLU)
-let std = (2.0 / fan_in as f64).sqrt();
-w = random_normal(0.0, std)
-*/
-
-// Forward pass math:
-// y_scalar = sigmoid( output_weights * ReLU( hidden_weight * input_vector + hidden_biases ) + output_biases )
-
-fn init_params() {}
 
 fn relu(x: f64) -> f64 {
     if x > 0.0 {
         x
     } else {
-        0.0
+        0.01 * x
+    }
+}
+
+fn standardize(inputs: &mut Vec<f64>) {
+    let mean = inputs.iter().sum::<f64>() / inputs.len() as f64;
+    let std = (inputs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / inputs.len() as f64).sqrt();
+    if std > 1e-8 {
+        for x in inputs.iter_mut() {
+            *x = (*x - mean) / std;
+        }
     }
 }
 
@@ -113,9 +120,9 @@ fn forward_pass(
 
 fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
     let epsilon: f64 = 1e-15;
-    let propability: f64 = prediction_propability.clamp(epsilon, 1.0 - epsilon);
+    let p: f64 = prediction_propability.clamp(epsilon, 1.0 - epsilon);
 
-    -(label * propability.ln() + (1.0 - label) * (1.0 - propability).ln())
+    -(label * p.ln() + (1.0 - label) * (1.0 - p).ln())
 }
 
 fn backward_pass(
@@ -134,8 +141,7 @@ fn backward_pass(
 
     let original_output_weights = output_weights.clone();
 
-    let weight = if label == 1.0 { 10.0 } else { 1.0 }; // Due to infrequent 1's
-    let gradient = (prediction_propability - label) * weight;
+    let gradient = prediction_propability - label;
 
     for (weight, activation) in output_weights
         .iter_mut()
@@ -153,7 +159,7 @@ fn backward_pass(
         let relu_derivative: f64 = if hidden_layer_activations[i] > 0.0 {
             1.0
         } else {
-            0.0
+            0.01
         };
 
         let hidden_gradient = gradient * original_output_weights[i] * relu_derivative;
@@ -172,45 +178,69 @@ fn train(
     output_weights: &mut Vec<f64>,
     output_bias: &mut f64,
 ) {
-    let learning_rate: f64 = 0.02;
+    let learning_rate: f64 = 0.01;
     let epochs = 20;
 
     let records: Vec<Row> = get_data("training_data.csv".to_string()).unwrap();
 
-    let mut input_vector: VecDeque<f64> = VecDeque::new();
-    let mut label: f64 = 0.0;
-    let mut prev_ticker = "";
+    // Pre-compute all valid (input_vector, label) pairs
+    let mut samples: Vec<(Vec<f64>, f64)> = Vec::new();
+    let mut i = 1;
+    while i < records.len() {
+        let start = i;
+        let ticker = records[i].ticker.clone();
+        while i < records.len() && records[i].ticker == ticker {
+            i += 1;
+        }
+        let end = i;
 
-    for epoch in 0..epochs {
-        for i in window_size..records.len() {
-            if records[i].ticker != prev_ticker {
-                input_vector.clear();
-                for j in 1..records.len() {
-                    input_vector.push_back(records[j].price);
-
-                    if j == window_size {
-                        label = records[j].is_minima;
-                        break;
-                    }
-                }
-                prev_ticker = &records[i].ticker;
+        // For this ticker, build sliding windows
+        for j in start..end {
+            let window_end = j + window_size;
+            if window_end >= end {
+                break;
             }
 
+            let input: Vec<f64> = (j..window_end).map(|k| records[k].price).collect();
+            let label = records[window_end].is_minima;
+            samples.push((input, label));
+        }
+    }
+
+    // Undersample negative class to achieve ~50/50 balance
+    let mut rng = rand::thread_rng();
+    let positives: Vec<(Vec<f64>, f64)> =
+        samples.iter().filter(|(_, l)| *l == 1.0).cloned().collect();
+    let mut negatives: Vec<(Vec<f64>, f64)> =
+        samples.iter().filter(|(_, l)| *l == 0.0).cloned().collect();
+    negatives.shuffle(&mut rng);
+    negatives.truncate(positives.len());
+    samples = negatives;
+    samples.extend(positives);
+
+    for epoch in 0..epochs {
+        // Shuffle samples each epoch
+        samples.shuffle(&mut rng);
+
+        for (input_vector, label) in &samples {
+            let mut input = input_vector.clone();
+            standardize(&mut input);
             let (prediction_probability, hidden_activations) = forward_pass(
-                Vec::from(input_vector.clone()),
+                input.clone(),
                 hidden_layer_weights.clone(),
                 hidden_layer_biases.clone(),
                 output_weights.clone(),
                 *output_bias,
             );
+            println!("Prediction: {:?}", prediction_probability);
 
-            let loss = binary_cross_entropy_loss(prediction_probability, label);
-            println!("{:?}", loss);
+            let loss = binary_cross_entropy_loss(prediction_probability, *label);
+            println!("Loss: {:?}", loss);
 
             backward_pass(
                 learning_rate,
-                label,
-                Vec::from(input_vector.clone()),
+                *label,
+                input.clone(),
                 prediction_probability,
                 hidden_activations,
                 hidden_layer_weights,
@@ -218,21 +248,18 @@ fn train(
                 output_weights,
                 output_bias,
             );
-
-            input_vector.pop_front();
-            input_vector.push_back(records[i].price);
-            label = records[i].is_minima;
         }
     }
 }
 
 fn predict(
-    input_vector: Vec<f64>,
+    mut input_vector: Vec<f64>,
     hidden_layer_weights: &mut Vec<Vec<f64>>,
     hidden_layer_biases: &mut Vec<f64>,
     output_weights: &mut Vec<f64>,
     output_bias: &mut f64,
 ) -> f64 {
+    standardize(&mut input_vector);
     let (prediction_probability, _) = forward_pass(
         input_vector.clone(),
         hidden_layer_weights.clone(),
@@ -251,33 +278,138 @@ fn evaluate(
     output_weights: &mut Vec<f64>,
     output_bias: &mut f64,
 ) {
+    let records: Vec<Row> = get_data("evaluation_data.csv".to_string()).unwrap();
+
+    let mut samples: Vec<(Vec<f64>, f64)> = Vec::new();
+    let mut i = 1;
+    while i < records.len() {
+        let start = i;
+        let ticker = records[i].ticker.clone();
+        while i < records.len() && records[i].ticker == ticker {
+            i += 1;
+        }
+        let end = i;
+
+        for j in start..end {
+            let window_end = j + window_size;
+            if window_end >= end {
+                break;
+            }
+
+            let input: Vec<f64> = (j..window_end).map(|k| records[k].price).collect();
+            let label = records[window_end].is_minima;
+            samples.push((input, label));
+        }
+    }
+
+    let mut total_loss = 0.0;
+    let mut correct = 0;
+    let mut true_positives = 0;
+    let mut false_positives = 0;
+    let mut false_negatives = 0;
+    let mut true_negatives = 0;
+
+    for (input_vector, label) in &samples {
+        let mut input = input_vector.clone();
+        standardize(&mut input);
+        let (prediction, _) = forward_pass(
+            input,
+            hidden_layer_weights.clone(),
+            hidden_layer_biases.clone(),
+            output_weights.clone(),
+            *output_bias,
+        );
+
+        total_loss += binary_cross_entropy_loss(prediction, *label);
+
+        let predicted_label = if prediction >= 0.5 { 1.0 } else { 0.0 };
+        if predicted_label == *label {
+            correct += 1;
+        }
+        if *label == 1.0 && predicted_label == 1.0 {
+            true_positives += 1;
+        }
+        if *label == 0.0 && predicted_label == 1.0 {
+            false_positives += 1;
+        }
+        if *label == 1.0 && predicted_label == 0.0 {
+            false_negatives += 1;
+        }
+        if *label == 0.0 && predicted_label == 0.0 {
+            true_negatives += 1;
+        }
+    }
+
+    let num_samples = samples.len() as f64;
+    println!("--- Evaluation ---");
+    println!("Samples: {}", samples.len());
+    println!("Avg Loss: {:.6}", total_loss / num_samples);
+    println!(
+        "Accuracy: {:.4} ({}/{})",
+        correct as f64 / num_samples,
+        correct,
+        samples.len()
+    );
+    println!(
+        "True Positives: {}  False Positives: {}  False Negatives: {}  True Negatives: {}",
+        true_positives, false_positives, false_negatives, true_negatives
+    );
+    if true_positives + false_positives > 0 {
+        println!(
+            "Precision: {:.4}",
+            true_positives as f64 / (true_positives + false_positives) as f64
+        );
+    }
+    if true_positives + false_negatives > 0 {
+        println!(
+            "Recall: {:.4}",
+            true_positives as f64 / (true_positives + false_negatives) as f64
+        );
+    }
+}
+
+fn init_params(window_size: usize, hidden_size: usize) -> (Vec<Vec<f64>>, Vec<f64>, Vec<f64>, f64) {
+    let mut rng = rand::thread_rng();
+    let normal = Normal::new(0.0, (2.0 / window_size as f64).sqrt()).unwrap();
+    let xavier_limit = (6.0 / (hidden_size + 1) as f64).sqrt();
+
+    // He initialization
+    let hidden_weights = (0..hidden_size)
+        .map(|_| (0..window_size).map(|_| normal.sample(&mut rng)).collect())
+        .collect();
+
+    let hidden_biases = vec![0.0; hidden_size];
+
+    // Xavier initialization
+    let output_weights = (0..hidden_size)
+        .map(|_| rng.gen_range(-xavier_limit..=xavier_limit))
+        .collect();
+
+    let output_bias = 0.0;
+
+    (hidden_weights, hidden_biases, output_weights, output_bias)
 }
 
 fn main() {
-    // TODO: Randomize
-    let mut hidden_layer_weights: Vec<Vec<f64>> = vec![vec![0.1f64; 100]; 50];
-    let mut hidden_layer_biases: Vec<f64> = vec![0f64; 50];
-
-    let mut output_weights: Vec<f64> = vec![0.1f64; 50];
-    let mut output_bias: f64 = 0f64;
-
     let window_size: usize = 100;
+    let hidden_size: usize = 50;
+
+    let (mut hidden_weights, mut hidden_biases, mut output_weights, mut output_bias) =
+        init_params(window_size, hidden_size);
 
     train(
         window_size.clone(),
-        &mut hidden_layer_weights,
-        &mut hidden_layer_biases,
+        &mut hidden_weights,
+        &mut hidden_biases,
         &mut output_weights,
         &mut output_bias,
     );
 
-    /*
     evaluate(
         window_size,
-        &mut hidden_layer_weights,
-        &mut hidden_layer_biases,
+        &mut hidden_weights,
+        &mut hidden_biases,
         &mut output_weights,
         &mut output_bias,
     );
-    */
 }
