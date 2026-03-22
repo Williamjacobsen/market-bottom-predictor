@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::{error::Error, fs::File};
 
 #[derive(Debug, Clone)]
@@ -131,6 +132,7 @@ fn backward_pass(
 
     let original_output_weights = output_weights.clone();
 
+    // TODO: let weight = if label == 1.0 { 10.0 } else { 1.0 };
     let gradient = prediction_propability - label;
 
     for (weight, activation) in output_weights
@@ -161,7 +163,68 @@ fn backward_pass(
     }
 }
 
-fn train() {}
+fn train(
+    hidden_layer_weights: &mut Vec<Vec<f64>>,
+    hidden_layer_biases: &mut Vec<f64>,
+    output_weights: &mut Vec<f64>,
+    output_bias: &mut f64,
+) {
+    let learning_rate: f64 = 0.02;
+    let epochs = 20;
+    let window_size = 100;
+
+    let mut records: Vec<Row> = get_data().unwrap();
+    pre_process_data(&mut records);
+
+    let mut index = 0;
+    let mut input_vector: VecDeque<f64> = VecDeque::new();
+    for i in 1..records.len() {
+        input_vector.push_back(records[i].price);
+
+        if i == window_size {
+            index = window_size;
+            break;
+        }
+    }
+    let label: f64 = records[index].is_minima;
+    println!("{:?}", input_vector.len());
+
+    for epoch in 0..epochs {
+        for i in window_size..records.len() {
+            // TODO: if new ticker, get & skip the first window_size data points again
+
+            let (prediction_probability, hidden_activations) = forward_pass(
+                Vec::from(input_vector.clone()),
+                hidden_layer_weights.clone(),
+                hidden_layer_biases.clone(),
+                output_weights.clone(),
+                *output_bias,
+            );
+
+            let loss = binary_cross_entropy_loss(prediction_probability, label);
+            println!("{:?}", loss);
+
+            backward_pass(
+                learning_rate,
+                label,
+                Vec::from(input_vector.clone()),
+                prediction_probability,
+                hidden_activations,
+                hidden_layer_weights,
+                hidden_layer_biases,
+                output_weights,
+                output_bias,
+            );
+
+            index += 1;
+            if index >= records.len() {
+                break;
+            }
+            input_vector.pop_front();
+            input_vector.push_back(records[index].price);
+        }
+    }
+}
 
 fn predict() {}
 
@@ -171,46 +234,14 @@ fn main() {
     let mut records: Vec<Row> = get_data().unwrap();
     pre_process_data(&mut records);
 
-    let mut input_vector: Vec<f64> = Vec::new();
-
-    for index in 91..records.len() {
-        input_vector.push(records[index].price);
-
-        if index == 190 {
-            break;
-        }
-    }
-    let label: f64 = records[190].is_minima;
-
-    println!("{:?}", input_vector.len());
-    println!("{:?}", label);
-
-    let learning_rate = 0.02;
-
+    // TODO: Randomize
     let mut hidden_layer_weights: Vec<Vec<f64>> = vec![vec![0.1f64; 100]; 50];
     let mut hidden_layer_biases: Vec<f64> = vec![0f64; 50];
 
     let mut output_weights: Vec<f64> = vec![0.1f64; 50];
     let mut output_bias: f64 = 0f64;
 
-    let (prediction_propability, hidden_activations) = forward_pass(
-        input_vector.clone(),
-        hidden_layer_weights.clone(),
-        hidden_layer_biases.clone(),
-        output_weights.clone(),
-        output_bias,
-    );
-    println!("{:?}", prediction_propability);
-
-    let loss = binary_cross_entropy_loss(prediction_propability, label);
-    println!("{:?}", loss);
-
-    backward_pass(
-        learning_rate,
-        label,
-        input_vector.clone(),
-        prediction_propability,
-        hidden_activations,
+    train(
         &mut hidden_layer_weights,
         &mut hidden_layer_biases,
         &mut output_weights,
