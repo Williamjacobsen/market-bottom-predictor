@@ -70,19 +70,16 @@ fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
 
-fn forward_pass(input_vector: Vec<f64>) -> (f64, Vec<f64>, f64, Vec<f64>, Vec<Vec<f64>>, Vec<f64>) {
-    /*
-     * hidden_weights size: hidden_layer_neurons_count * input_dimensions,
-     * 50 * 100,
-     * 50 rows, 100 columns,
-     * there is 50 neuron and each neuron has 100 inputs,
-     */
-    let hidden_weights: Vec<Vec<f64>> = vec![vec![0.1f64; 100]; 50];
-    let hidden_biases: Vec<f64> = vec![0f64; 50];
-
+fn forward_pass(
+    input_vector: Vec<f64>,
+    hidden_layer_weights: Vec<Vec<f64>>,
+    hidden_layer_biases: Vec<f64>,
+    output_weights: Vec<f64>,
+    output_bias: f64,
+) -> (f64, Vec<f64>) {
     // Hidden layers internal score
     let mut neuron_signals: Vec<f64> = Vec::new();
-    for (neuron_weights, bias) in hidden_weights.iter().zip(hidden_biases.iter()) {
+    for (neuron_weights, bias) in hidden_layer_weights.iter().zip(hidden_layer_biases.iter()) {
         let mut sum = 0f64;
 
         for (weight, input) in neuron_weights.iter().zip(input_vector.iter()) {
@@ -99,9 +96,6 @@ fn forward_pass(input_vector: Vec<f64>) -> (f64, Vec<f64>, f64, Vec<f64>, Vec<Ve
     }
 
     // Output neuron internal score
-    let output_weights: Vec<f64> = vec![0.1f64; 50];
-    let output_bias: f64 = 0f64;
-
     let mut output_signal: f64 = 0f64;
     for (neuron_signal, output_weight) in neuron_signals.iter().zip(output_weights.iter()) {
         output_signal += neuron_signal * output_weight;
@@ -111,14 +105,7 @@ fn forward_pass(input_vector: Vec<f64>) -> (f64, Vec<f64>, f64, Vec<f64>, Vec<Ve
     // Output neuron activation
     output_signal = sigmoid(output_signal);
 
-    (
-        output_signal,
-        output_weights,
-        output_bias,
-        neuron_signals,
-        hidden_weights,
-        hidden_biases,
-    )
+    (output_signal, neuron_signals)
 }
 
 fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
@@ -198,20 +185,25 @@ fn main() {
     println!("{:?}", input_vector.len());
     println!("{:?}", label);
 
-    let (
-        prediction_propability,
-        mut output_weights,
-        mut output_bias,
-        hidden_activations,
-        mut hidden_weights,
-        mut hidden_biases,
-    ) = forward_pass(input_vector.clone());
+    let learning_rate = 0.02;
+
+    let mut hidden_layer_weights: Vec<Vec<f64>> = vec![vec![0.1f64; 100]; 50];
+    let mut hidden_layer_biases: Vec<f64> = vec![0f64; 50];
+
+    let mut output_weights: Vec<f64> = vec![0.1f64; 50];
+    let mut output_bias: f64 = 0f64;
+
+    let (prediction_propability, hidden_activations) = forward_pass(
+        input_vector.clone(),
+        hidden_layer_weights.clone(),
+        hidden_layer_biases.clone(),
+        output_weights.clone(),
+        output_bias,
+    );
     println!("{:?}", prediction_propability);
 
     let loss = binary_cross_entropy_loss(prediction_propability, label);
     println!("{:?}", loss);
-
-    let learning_rate = 0.02;
 
     backward_pass(
         learning_rate,
@@ -219,22 +211,9 @@ fn main() {
         input_vector.clone(),
         prediction_propability,
         hidden_activations,
-        &mut hidden_weights,
-        &mut hidden_biases,
+        &mut hidden_layer_weights,
+        &mut hidden_layer_biases,
         &mut output_weights,
         &mut output_bias,
     );
-
-    let (
-        prediction_propability,
-        mut output_weights,
-        mut output_bias,
-        hidden_activations,
-        mut hidden_weights,
-        mut hidden_biases,
-    ) = forward_pass(input_vector.clone());
-    println!("{:?}", prediction_propability);
-
-    let loss = binary_cross_entropy_loss(prediction_propability, label);
-    println!("{:?}", loss);
 }
