@@ -131,6 +131,7 @@ fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
 fn backward_pass(
     learning_rate: f64,
     label: f64,
+    inputs: Vec<f64>,
     prediction_propability: f64,
     hidden_layer_activations: Vec<f64>,
     hidden_layer_weights: &mut Vec<Vec<f64>>,
@@ -138,15 +139,38 @@ fn backward_pass(
     output_weights: &mut Vec<f64>,
     output_bias: &mut f64,
 ) {
-    let gradient = prediction_propability - label;
+    // Correction for output layer:
+    // Output_Neuron_Weight_i -= Output_Neuron_Activation_i * (prediction - label) * learning_rate
 
-    println!("{:?}", gradient);
+    let original_output_weights = output_weights.clone();
+
+    let gradient = prediction_propability - label;
 
     for (weight, activation) in output_weights
         .iter_mut()
         .zip(hidden_layer_activations.iter())
     {
         *weight -= learning_rate * gradient * activation;
+    }
+    *output_bias -= learning_rate * gradient;
+
+    // Correction for hidden layer:
+    // Hidden_Layer_Neuron_Weight_i_j -= input[j] * ((prediction - label) * Output_Neuron_Weight_i
+    // * ReLU_Derivative) * learning_rate
+
+    for i in 0..hidden_layer_activations.len() {
+        let relu_derivative: f64 = if hidden_layer_activations[i] > 0.0 {
+            1.0
+        } else {
+            0.0
+        };
+
+        let hidden_gradient = gradient * original_output_weights[i] * relu_derivative;
+
+        for j in 0..hidden_layer_weights[i].len() {
+            hidden_layer_weights[i][j] -= inputs[j] * hidden_gradient * learning_rate;
+        }
+        hidden_layer_biases[i] -= learning_rate * hidden_gradient;
     }
 }
 
@@ -181,7 +205,7 @@ fn main() {
         hidden_activations,
         mut hidden_weights,
         mut hidden_biases,
-    ) = forward_pass(input_vector);
+    ) = forward_pass(input_vector.clone());
     println!("{:?}", prediction_propability);
 
     let loss = binary_cross_entropy_loss(prediction_propability, label);
@@ -192,6 +216,7 @@ fn main() {
     backward_pass(
         learning_rate,
         label,
+        input_vector.clone(),
         prediction_propability,
         hidden_activations,
         &mut hidden_weights,
@@ -199,4 +224,17 @@ fn main() {
         &mut output_weights,
         &mut output_bias,
     );
+
+    let (
+        prediction_propability,
+        mut output_weights,
+        mut output_bias,
+        hidden_activations,
+        mut hidden_weights,
+        mut hidden_biases,
+    ) = forward_pass(input_vector.clone());
+    println!("{:?}", prediction_propability);
+
+    let loss = binary_cross_entropy_loss(prediction_propability, label);
+    println!("{:?}", loss);
 }
