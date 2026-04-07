@@ -6,6 +6,12 @@ A neural network that predicts market minima (local bottoms) from price data.
 
 Trains a single-hidden-layer neural network on windows of price returns to predict when a market bottom will occur.
 
+## Example Output
+
+![Price and Probability Plot](plot_KO.png)
+
+The top panel shows price returns with actual minima marked in green. The bottom panel shows the model's probability predictions with a 0.7 threshold line.
+
 ## Project Structure
 
 - `src/main.rs` - Neural network implementation (training, evaluation, prediction)
@@ -46,12 +52,6 @@ python3 interactive_plot.py
 - **Optimization**: Stochastic gradient descent, learning rate 0.01, 5 epochs
 - **Threshold**: 0.70 for positive prediction
 - **Weight initialization**: He init for hidden weights, Xavier init for output weights
-
-## Example Output
-
-![Price and Probability Plot](plot_KO.png)
-
-The top panel shows price returns with actual minima marked in green. The bottom panel shows the model's probability predictions with a 0.7 threshold line.
 
 ## Data Format
 
