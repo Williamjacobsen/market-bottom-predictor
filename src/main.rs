@@ -1,7 +1,11 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
+use std::io::Write;
 use std::{error::Error, fs::File};
+
+const POS_WEIGHT: f64 = 15.0;
+const THRESHOLD: f64 = 0.70;
 
 #[derive(Debug, Clone)]
 struct Row {
@@ -118,11 +122,12 @@ fn forward_pass(
     (output_signal, neuron_signals)
 }
 
-fn binary_cross_entropy_loss(prediction_propability: f64, label: f64) -> f64 {
+fn binary_cross_entropy_loss(prediction_propability: f64, label: f64, is_training: bool) -> f64 {
     let epsilon: f64 = 1e-15;
     let p: f64 = prediction_propability.clamp(epsilon, 1.0 - epsilon);
+    let pos_weight = if is_training { POS_WEIGHT } else { 1.0 };
 
-    -(label * p.ln() + (1.0 - label) * (1.0 - p).ln())
+    -(pos_weight * label * p.ln() + (1.0 - label) * (1.0 - p).ln())
 }
 
 fn backward_pass(
@@ -141,7 +146,11 @@ fn backward_pass(
 
     let original_output_weights = output_weights.clone();
 
-    let gradient = prediction_propability - label;
+    let gradient = if label == 1.0 {
+        POS_WEIGHT * (prediction_propability - label)
+    } else {
+        prediction_propability - label
+    };
 
     for (weight, activation) in output_weights
         .iter_mut()
@@ -179,7 +188,8 @@ fn train(
     output_bias: &mut f64,
 ) {
     let learning_rate: f64 = 0.01;
-    let epochs = 20;
+    //let epochs = 20;
+    let epochs = 5;
 
     let records: Vec<Row> = get_data("training_data.csv".to_string()).unwrap();
 
@@ -207,18 +217,11 @@ fn train(
         }
     }
 
-    // Undersample negative class to achieve ~50/50 balance
     let mut rng = rand::thread_rng();
-    let positives: Vec<(Vec<f64>, f64)> =
-        samples.iter().filter(|(_, l)| *l == 1.0).cloned().collect();
-    let mut negatives: Vec<(Vec<f64>, f64)> =
-        samples.iter().filter(|(_, l)| *l == 0.0).cloned().collect();
-    negatives.shuffle(&mut rng);
-    negatives.truncate(positives.len());
-    samples = negatives;
-    samples.extend(positives);
 
     for epoch in 0..epochs {
+        println!("epoch: {:?}/{:?}", epoch + 1, epochs);
+
         // Shuffle samples each epoch
         samples.shuffle(&mut rng);
 
@@ -232,10 +235,10 @@ fn train(
                 output_weights.clone(),
                 *output_bias,
             );
-            println!("Prediction: {:?}", prediction_probability);
+            //println!("Prediction: {:?}", prediction_probability);
 
-            let loss = binary_cross_entropy_loss(prediction_probability, *label);
-            println!("Loss: {:?}", loss);
+            let loss = binary_cross_entropy_loss(prediction_probability, *label, true);
+            //println!("Loss: {:?}", loss);
 
             backward_pass(
                 learning_rate,
@@ -280,7 +283,9 @@ fn evaluate(
 ) {
     let records: Vec<Row> = get_data("evaluation_data.csv".to_string()).unwrap();
 
-    let mut samples: Vec<(Vec<f64>, f64)> = Vec::new();
+    let mut samples: Vec<(Vec<f64>, f64, usize, f64, String)> = Vec::new();
+
+    // Make windows (inputs)
     let mut i = 1;
     while i < records.len() {
         let start = i;
@@ -298,7 +303,10 @@ fn evaluate(
 
             let input: Vec<f64> = (j..window_end).map(|k| records[k].price).collect();
             let label = records[window_end].is_minima;
-            samples.push((input, label));
+            let index = window_end;
+            let price = records[window_end].price;
+            let ticker_clone = records[window_end].ticker.clone();
+            samples.push((input, label, index, price, ticker_clone));
         }
     }
 
@@ -309,7 +317,8 @@ fn evaluate(
     let mut false_negatives = 0;
     let mut true_negatives = 0;
 
-    for (input_vector, label) in &samples {
+    // Predict for each window and store statistics.
+    for (input_vector, label, index, price, ticker) in &samples {
         let mut input = input_vector.clone();
         standardize(&mut input);
         let (prediction, _) = forward_pass(
@@ -320,9 +329,9 @@ fn evaluate(
             *output_bias,
         );
 
-        total_loss += binary_cross_entropy_loss(prediction, *label);
+        total_loss += binary_cross_entropy_loss(prediction, *label, false);
 
-        let predicted_label = if prediction >= 0.5 { 1.0 } else { 0.0 };
+        let predicted_label = if prediction >= THRESHOLD { 1.0 } else { 0.0 };
         if predicted_label == *label {
             correct += 1;
         }
@@ -340,6 +349,7 @@ fn evaluate(
         }
     }
 
+    // Log results
     let num_samples = samples.len() as f64;
     println!("--- Evaluation ---");
     println!("Samples: {}", samples.len());
@@ -366,6 +376,36 @@ fn evaluate(
             true_positives as f64 / (true_positives + false_negatives) as f64
         );
     }
+
+    let mut file = File::create("predictions.csv").unwrap();
+
+    // Save results for plotting.
+    writeln!(file, "ticker,index,price,probability,label").unwrap();
+    let mut total_loss = 0.0;
+
+    for (input_vector, label, index, price, ticker) in &samples {
+        let mut input = input_vector.clone();
+        standardize(&mut input);
+
+        let (prediction, _) = forward_pass(
+            input,
+            hidden_layer_weights.clone(),
+            hidden_layer_biases.clone(),
+            output_weights.clone(),
+            *output_bias,
+        );
+
+        total_loss += binary_cross_entropy_loss(prediction, *label, false);
+
+        writeln!(
+            file,
+            "{},{},{:.6},{:.6},{}",
+            ticker, index, price, prediction, label
+        )
+        .unwrap();
+    }
+
+    println!("Saved predictions to predictions.csv");
 }
 
 fn init_params(window_size: usize, hidden_size: usize) -> (Vec<Vec<f64>>, Vec<f64>, Vec<f64>, f64) {
@@ -397,6 +437,7 @@ fn main() {
     let (mut hidden_weights, mut hidden_biases, mut output_weights, mut output_bias) =
         init_params(window_size, hidden_size);
 
+    println!("Training...");
     train(
         window_size.clone(),
         &mut hidden_weights,
@@ -405,6 +446,7 @@ fn main() {
         &mut output_bias,
     );
 
+    println!("Evaluating...");
     evaluate(
         window_size,
         &mut hidden_weights,
